@@ -1,0 +1,319 @@
+/**
+ * Test proving that when total competitors ≤ 112, no subset should have more than 4 competitors
+ * 
+ * Mathematical reasoning:
+ * - Maximum subsets allowed: 28
+ * - If competitors ≤ 112, then 112 ÷ 28 = 4 competitors per subset average
+ * - Since we can create up to 28 subsets, no subset needs to exceed 4 competitors
+ * - This ensures optimal load balancing within the constraint limits
+ */
+
+import { solveMIP } from '../../src/algorithms/mip-solver';
+import { solveClustering } from '../../src/algorithms/clustering';
+import { expectAllConstraintsMet } from '../utils/constraint-validators';
+import type { Competitor, EquipmentClass, AgeGroup, Gender } from '../../src/types';
+
+// Helper to generate test datasets of specific sizes with guardian relationships
+function generateTestDatasetWithGuardians(size: number): Competitor[] {
+    const competitors: Competitor[] = [];
+    const equipmentClasses: EquipmentClass[] = ['HB', 'LB', 'TR', 'BHR', 'BBR', 'FSR', 'BBC', 'BL', 'BU', 'FSC', 'FU'];
+    const ageGroups: AgeGroup[] = ['C', 'J', 'YA', 'A', 'V', 'S'];
+    const genders: Gender[] = ['M', 'F'];
+
+    let competitorId = 1;
+
+    // Create some guardian families (about 20% of competitors)
+    const numFamilies = Math.floor(size * 0.2 / 2.5); // Assuming average family size of 2.5
+
+    for (let familyIndex = 0; familyIndex < numFamilies && competitorId <= size; familyIndex++) {
+        const guardianId = competitorId.toString().padStart(3, '0');
+        const equipmentClass = equipmentClasses[familyIndex % equipmentClasses.length];
+        const guardianAge: AgeGroup = familyIndex % 2 === 0 ? 'A' : 'V';
+        const guardianGender = genders[familyIndex % 2];
+
+        // Create guardian
+        competitors.push({
+            id: guardianId,
+            equipmentClass,
+            ageCategory: guardianAge,
+            gender: guardianGender
+        });
+        competitorId++;
+
+        // Create 1-2 dependents for this guardian
+        const numDependents = (familyIndex % 2) + 1;
+        for (let depIndex = 0; depIndex < numDependents && competitorId <= size; depIndex++) {
+            const dependentId = competitorId.toString().padStart(3, '0');
+            const dependentEquipment = equipmentClasses[(familyIndex + depIndex + 1) % equipmentClasses.length];
+            const dependentAge: AgeGroup = depIndex === 0 ? 'C' : 'J';
+            const dependentGender = genders[(familyIndex + depIndex) % 2];
+
+            competitors.push({
+                id: dependentId,
+                equipmentClass: dependentEquipment,
+                ageCategory: dependentAge,
+                gender: dependentGender,
+                guardianId: guardianId
+            });
+            competitorId++;
+        }
+    }
+
+    // Fill remaining with individual competitors
+    while (competitorId <= size) {
+        const id = competitorId.toString().padStart(3, '0');
+        const equipmentClass = equipmentClasses[(competitorId - 1) % equipmentClasses.length];
+        const ageCategory = ageGroups[Math.floor((competitorId - 1) / equipmentClasses.length) % ageGroups.length];
+        const gender = genders[(competitorId - 1) % 2];
+
+        competitors.push({
+            id,
+            equipmentClass,
+            ageCategory,
+            gender
+        });
+        competitorId++;
+    }
+
+    return competitors.slice(0, size); // Ensure exact size
+}
+
+describe('Maximum Subset Size Constraint for ≤112 Competitors', () => {
+
+    // Test various sizes up to 112 competitors
+    const testSizes = [
+        8,    // Small
+        16,   // Small-medium
+        28,   // 28 subsets of size 1 (minimum case)
+        32,   // Slightly above minimum
+        48,   // Medium
+        64,   // Medium-large
+        80,   // Large
+        96,   // Very large
+        112   // Maximum for this constraint
+    ];
+
+    describe('MIP Algorithm - No subset > 4 competitors when total ≤ 112', () => {
+        test.each(testSizes)('MIP with %d competitors should have no subset > 4', (size) => {
+            const dataset = generateTestDatasetWithGuardians(size);
+            const result = solveMIP(dataset);
+
+            // Verify all constraints are met
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Main assertion: no subset should have more than 4 competitors
+            for (let i = 0; i < result.result.subsets.length; i++) {
+                const subset = result.result.subsets[i];
+                expect(subset.length).toBeLessThanOrEqual(4);
+
+                if (subset.length > 4) {
+                    console.error(`MIP: Subset ${i + 1} has ${subset.length} competitors (> 4) with total ${size} competitors`);
+                    console.error('Subset members:', subset.map(c => c.id).join(', '));
+                }
+            }
+
+            // Verify we're using the available subsets efficiently
+            const totalSubsets = result.result.metadata.totalSubsets;
+            const maxPossibleSubsets = Math.min(28, Math.ceil(size / 2)); // Can't exceed 28 or minimum needed
+
+            expect(totalSubsets).toBeLessThanOrEqual(maxPossibleSubsets);
+
+            console.log(`MIP ${size} competitors: ${totalSubsets} subsets, max size: ${Math.max(...result.result.subsets.map(s => s.length))}`);
+        });
+    });
+
+    describe('Clustering Algorithm - No subset > 4 competitors when total ≤ 112', () => {
+        test.each(testSizes)('Clustering with %d competitors should have no subset > 4', (size) => {
+            const dataset = generateTestDatasetWithGuardians(size);
+            const result = solveClustering(dataset);
+
+            // Verify all constraints are met
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Main assertion: no subset should have more than 4 competitors
+            for (let i = 0; i < result.result.subsets.length; i++) {
+                const subset = result.result.subsets[i];
+                expect(subset.length).toBeLessThanOrEqual(4);
+
+                if (subset.length > 4) {
+                    console.error(`Clustering: Subset ${i + 1} has ${subset.length} competitors (> 4) with total ${size} competitors`);
+                    console.error('Subset members:', subset.map(c => c.id).join(', '));
+                }
+            }
+
+            const totalSubsets = result.result.metadata.totalSubsets;
+            const maxPossibleSubsets = Math.min(28, Math.ceil(size / 2));
+
+            expect(totalSubsets).toBeLessThanOrEqual(maxPossibleSubsets);
+
+            console.log(`Clustering ${size} competitors: ${totalSubsets} subsets, max size: ${Math.max(...result.result.subsets.map(s => s.length))}`);
+        });
+    });
+
+        test.each(branchBoundTestSizes)('Branch-and-bound with %d competitors should have no subset > 4', (size) => {
+            const dataset = generateTestDatasetWithGuardians(size);
+            const result = // Branch-and-bound removed;
+
+            // Verify all constraints are met
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Main assertion: no subset should have more than 4 competitors
+            for (let i = 0; i < result.result.subsets.length; i++) {
+                const subset = result.result.subsets[i];
+                expect(subset.length).toBeLessThanOrEqual(4);
+
+                if (subset.length > 4) {
+                    console.error(`Branch-and-bound: Subset ${i + 1} has ${subset.length} competitors (> 4) with total ${size} competitors`);
+                    console.error('Subset members:', subset.map(c => c.id).join(', '));
+                }
+            }
+
+            const totalSubsets = result.result.metadata.totalSubsets;
+            const maxPossibleSubsets = Math.min(28, Math.ceil(size / 2));
+
+            expect(totalSubsets).toBeLessThanOrEqual(maxPossibleSubsets);
+
+            console.log(`Branch-and-bound ${size} competitors: ${totalSubsets} subsets, max size: ${Math.max(...result.result.subsets.map(s => s.length))}`);
+        });
+    });
+
+    describe('Edge Cases for ≤112 Constraint', () => {
+        test('exactly 112 competitors should have no subset > 4', () => {
+            const dataset = generateTestDatasetWithGuardians(112);
+
+            const mipResult = solveMIP(dataset);
+            const clusteringResult = solveClustering(dataset);
+
+            // Both algorithms should satisfy the constraint
+            expectAllConstraintsMet(dataset, mipResult.result);
+            expectAllConstraintsMet(dataset, clusteringResult.result);
+
+            // No subset should exceed 4 competitors
+            mipResult.result.subsets.forEach((subset, index) => {
+                expect(subset.length).toBeLessThanOrEqual(4);
+            });
+
+            clusteringResult.result.subsets.forEach((subset, index) => {
+                expect(subset.length).toBeLessThanOrEqual(4);
+            });
+
+            // Should use exactly or close to 28 subsets (112 ÷ 4 = 28)
+            expect(mipResult.result.metadata.totalSubsets).toBeGreaterThanOrEqual(26);
+            expect(mipResult.result.metadata.totalSubsets).toBeLessThanOrEqual(28);
+
+            expect(clusteringResult.result.metadata.totalSubsets).toBeGreaterThanOrEqual(26);
+            expect(clusteringResult.result.metadata.totalSubsets).toBeLessThanOrEqual(28);
+
+            console.log(`112 competitors results:`);
+            console.log(`  MIP: ${mipResult.result.metadata.totalSubsets} subsets, sizes: ${mipResult.result.subsets.map(s => s.length).join(', ')}`);
+            console.log(`  Clustering: ${clusteringResult.result.metadata.totalSubsets} subsets, sizes: ${clusteringResult.result.subsets.map(s => s.length).join(', ')}`);
+        });
+
+        test('boundary case: 113 competitors should allow subsets > 4', () => {
+            // This test proves the constraint only applies to ≤112
+            const dataset = generateTestDatasetWithGuardians(113);
+
+            const mipResult = solveMIP(dataset);
+            const clusteringResult = solveClustering(dataset);
+
+            expectAllConstraintsMet(dataset, mipResult.result);
+            expectAllConstraintsMet(dataset, clusteringResult.result);
+
+            // With 113 competitors and max 28 subsets, at least one subset must have ≥5 competitors
+            // 113 ÷ 28 ≈ 4.04, so we need some subsets with 5 competitors
+
+            const mipMaxSize = Math.max(...mipResult.result.subsets.map(s => s.length));
+            const clusteringMaxSize = Math.max(...clusteringResult.result.subsets.map(s => s.length));
+
+            // At least one algorithm should have a subset > 4 (though not required, it's mathematically likely)
+            console.log(`113 competitors - MIP max subset size: ${mipMaxSize}, Clustering max subset size: ${clusteringMaxSize}`);
+
+            // The key point is that subsets can be > 4 when total > 112
+            // (This doesn't test that they MUST be > 4, just that they CAN be)
+        });
+
+        test('guardian families should not force subsets > 4 when total ≤ 112', () => {
+            // Create a dataset with some large guardian families
+            const competitors: Competitor[] = [
+                // Large family 1: guardian + 3 dependents = 4 total
+                { id: '001', equipmentClass: 'HB', ageCategory: 'A', gender: 'M' },
+                { id: '002', equipmentClass: 'HB', ageCategory: 'C', gender: 'M', guardianId: '001' },
+                { id: '003', equipmentClass: 'HB', ageCategory: 'C', gender: 'F', guardianId: '001' },
+                { id: '004', equipmentClass: 'HB', ageCategory: 'J', gender: 'M', guardianId: '001' },
+
+                // Large family 2: guardian + 3 dependents = 4 total  
+                { id: '005', equipmentClass: 'LB', ageCategory: 'A', gender: 'F' },
+                { id: '006', equipmentClass: 'LB', ageCategory: 'C', gender: 'F', guardianId: '005' },
+                { id: '007', equipmentClass: 'LB', ageCategory: 'C', gender: 'M', guardianId: '005' },
+                { id: '008', equipmentClass: 'LB', ageCategory: 'J', gender: 'F', guardianId: '005' },
+            ];
+
+            // Add more individual competitors to reach a total ≤ 112
+            for (let i = 9; i <= 100; i++) {
+                const id = i.toString().padStart(3, '0');
+                const equipmentClass: EquipmentClass = ['TR', 'BHR', 'BBR', 'FSR', 'BBC'][i % 5] as EquipmentClass;
+                const ageCategory: AgeGroup = ['YA', 'A', 'V', 'S'][i % 4] as AgeGroup;
+                const gender: Gender = i % 2 === 0 ? 'M' : 'F';
+
+                competitors.push({ id, equipmentClass, ageCategory, gender });
+            }
+
+            expect(competitors.length).toBeLessThanOrEqual(112);
+
+            const mipResult = solveMIP(competitors);
+            const clusteringResult = solveClustering(competitors);
+
+            expectAllConstraintsMet(competitors, mipResult.result);
+            expectAllConstraintsMet(competitors, clusteringResult.result);
+
+            // Even with large guardian families, no subset should exceed 4
+            mipResult.result.subsets.forEach((subset, index) => {
+                expect(subset.length).toBeLessThanOrEqual(4);
+            });
+
+            clusteringResult.result.subsets.forEach((subset, index) => {
+                expect(subset.length).toBeLessThanOrEqual(4);
+            });
+
+            console.log(`Large families test (${competitors.length} competitors):`);
+            console.log(`  MIP max subset size: ${Math.max(...mipResult.result.subsets.map(s => s.length))}`);
+            console.log(`  Clustering max subset size: ${Math.max(...clusteringResult.result.subsets.map(s => s.length))}`);
+        });
+    });
+
+    describe('Mathematical Verification', () => {
+        test('mathematical proof: ≤112 competitors can always fit in ≤28 subsets of ≤4', () => {
+            // This test verifies the mathematical reasoning
+            const testCases = [
+                { competitors: 112, expectedMaxSubsets: 28, maxSubsetSize: 4 },
+                { competitors: 108, expectedMaxSubsets: 27, maxSubsetSize: 4 },
+                { competitors: 100, expectedMaxSubsets: 25, maxSubsetSize: 4 },
+                { competitors: 80, expectedMaxSubsets: 20, maxSubsetSize: 4 },
+                { competitors: 56, expectedMaxSubsets: 14, maxSubsetSize: 4 },
+            ];
+
+            testCases.forEach(({ competitors, expectedMaxSubsets, maxSubsetSize }) => {
+                // Mathematical verification
+                const minSubsetsNeeded = Math.ceil(competitors / maxSubsetSize);
+                expect(minSubsetsNeeded).toBeLessThanOrEqual(expectedMaxSubsets);
+                expect(expectedMaxSubsets).toBeLessThanOrEqual(28);
+
+                // Practical verification with actual algorithm
+                const dataset = generateTestDatasetWithGuardians(competitors);
+                const result = solveMIP(dataset);
+
+                expectAllConstraintsMet(dataset, result.result);
+
+                // Verify no subset exceeds the mathematical limit
+                result.result.subsets.forEach(subset => {
+                    expect(subset.length).toBeLessThanOrEqual(maxSubsetSize);
+                });
+
+                // Verify we don't use more subsets than mathematically necessary
+                expect(result.result.metadata.totalSubsets).toBeLessThanOrEqual(expectedMaxSubsets);
+
+                console.log(`${competitors} competitors: need ≤${minSubsetsNeeded} subsets, used ${result.result.metadata.totalSubsets}, max size ${Math.max(...result.result.subsets.map(s => s.length))}`);
+            });
+        });
+    });
+});

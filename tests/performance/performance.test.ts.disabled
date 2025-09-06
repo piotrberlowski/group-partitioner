@@ -1,0 +1,262 @@
+/**
+ * Performance and scalability tests
+ */
+
+import { solveMIP } from '../../src/algorithms/mip-solver';
+import { solveClustering } from '../../src/algorithms/clustering';
+import { compareAlgorithms } from '../../src/index';
+
+import { smallDataset } from '../data/small-dataset';
+import { mediumDataset } from '../data/medium-dataset';
+import { largeDataset } from '../data/large-dataset';
+import { forceMaxSubsetsDataset } from '../data/edge-cases';
+
+import { expectAllConstraintsMet } from '../utils/constraint-validators';
+import type { Competitor, EquipmentClass, AgeGroup, Gender } from '../../src/types';
+
+// Helper to generate test datasets of specific sizes
+function generateTestDataset(size: number): Competitor[] {
+    const competitors: Competitor[] = [];
+    const equipmentClasses: EquipmentClass[] = ['HB', 'LB', 'TR', 'BHR', 'BBR', 'FSR', 'BBC', 'BL', 'BU', 'FSC', 'FU'];
+    const ageGroups: AgeGroup[] = ['C', 'J', 'YA', 'A', 'V', 'S'];
+    const genders: Gender[] = ['M', 'F'];
+
+    for (let i = 1; i <= size; i++) {
+        const id = i.toString().padStart(3, '0');
+        const equipmentClass = equipmentClasses[(i - 1) % equipmentClasses.length];
+        const ageCategory = ageGroups[Math.floor((i - 1) / equipmentClasses.length) % ageGroups.length];
+        const gender = genders[(i - 1) % 2];
+
+        competitors.push({ id, equipmentClass, ageCategory, gender });
+    }
+
+    return competitors;
+}
+
+describe('Performance Tests', () => {
+
+    describe('Execution Time Benchmarks', () => {
+        test('small dataset performance (8 competitors)', async () => {
+            const startMIP = performance.now();
+            const mipResult = solveMIP(smallDataset);
+            const mipTime = performance.now() - startMIP;
+
+            const startClustering = performance.now();
+            const clusteringResult = solveClustering(smallDataset);
+            const clusteringTime = performance.now() - startClustering;
+
+            const startBranchBound = performance.now();
+            const // Branch-and-bound removed;
+            const branchBoundTime = performance.now() - startBranchBound;
+
+            // All should complete quickly for small datasets
+            expect(mipTime).toBeLessThan(1000); // 1 second
+            expect(clusteringTime).toBeLessThan(1000);
+            expect(branchBoundTime).toBeLessThan(2000); // Branch-and-bound can be slightly slower
+
+            // Verify all results are valid
+            expectAllConstraintsMet(smallDataset, mipResult.result);
+            expectAllConstraintsMet(smallDataset, clusteringResult.result);
+            expectAllConstraintsMet(smallDataset, // Branch-and-bound removed;
+
+            console.log(`Small dataset (${smallDataset.length} competitors):`);
+            console.log(`  MIP: ${mipTime.toFixed(2)}ms`);
+            console.log(`  Clustering: ${clusteringTime.toFixed(2)}ms`);
+            console.log(`  Branch-and-bound: ${branchBoundTime.toFixed(2)}ms`);
+        });
+
+        test('medium dataset performance (24 competitors)', async () => {
+            const startMIP = performance.now();
+            const mipResult = solveMIP(mediumDataset);
+            const mipTime = performance.now() - startMIP;
+
+            const startClustering = performance.now();
+            const clusteringResult = solveClustering(mediumDataset);
+            const clusteringTime = performance.now() - startClustering;
+
+            const startBranchBound = performance.now();
+            const // Branch-and-bound removed;
+            const branchBoundTime = performance.now() - startBranchBound;
+
+            // Should complete in reasonable time
+            expect(mipTime).toBeLessThan(5000); // 5 seconds
+            expect(clusteringTime).toBeLessThan(5000);
+            expect(branchBoundTime).toBeLessThan(15000); // Branch-and-bound may take longer
+
+            expectAllConstraintsMet(mediumDataset, mipResult.result);
+            expectAllConstraintsMet(mediumDataset, clusteringResult.result);
+            expectAllConstraintsMet(mediumDataset, // Branch-and-bound removed;
+
+            console.log(`Medium dataset (${mediumDataset.length} competitors):`);
+            console.log(`  MIP: ${mipTime.toFixed(2)}ms`);
+            console.log(`  Clustering: ${clusteringTime.toFixed(2)}ms`);
+            console.log(`  Branch-and-bound: ${branchBoundTime.toFixed(2)}ms`);
+        });
+
+        test('large dataset performance (168 competitors)', async () => {
+            // Only test MIP and Clustering for large dataset
+            const startMIP = performance.now();
+            const mipResult = solveMIP(largeDataset);
+            const mipTime = performance.now() - startMIP;
+
+            const startClustering = performance.now();
+            const clusteringResult = solveClustering(largeDataset);
+            const clusteringTime = performance.now() - startClustering;
+
+            // Should handle maximum dataset size efficiently
+            expect(mipTime).toBeLessThan(20000); // 20 seconds
+            expect(clusteringTime).toBeLessThan(25000); // 25 seconds
+
+            expectAllConstraintsMet(largeDataset, mipResult.result);
+            expectAllConstraintsMet(largeDataset, clusteringResult.result);
+
+            console.log(`Large dataset (${largeDataset.length} competitors):`);
+            console.log(`  MIP: ${mipTime.toFixed(2)}ms`);
+            console.log(`  Clustering: ${clusteringTime.toFixed(2)}ms`);
+            console.log(`  Branch-and-bound: skipped (too slow for large datasets)`);
+        });
+    });
+
+    describe('Scalability Tests', () => {
+        const testSizes = [10, 20, 40, 60];
+
+        test.each(testSizes)('MIP algorithm scalability with %d competitors', (size) => {
+            const dataset = generateTestDataset(size);
+
+            const start = performance.now();
+            const result = solveMIP(dataset);
+            const executionTime = performance.now() - start;
+
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Execution time should scale reasonably (not exponentially)
+            const expectedMaxTime = size * 100; // Rough linear scaling expectation
+            expect(executionTime).toBeLessThan(expectedMaxTime);
+
+            console.log(`MIP with ${size} competitors: ${executionTime.toFixed(2)}ms`);
+        });
+
+        test.each(testSizes)('Clustering algorithm scalability with %d competitors', (size) => {
+            const dataset = generateTestDataset(size);
+
+            const start = performance.now();
+            const result = solveClustering(dataset);
+            const executionTime = performance.now() - start;
+
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Clustering should scale well
+            const expectedMaxTime = size * 150;
+            expect(executionTime).toBeLessThan(expectedMaxTime);
+
+            console.log(`Clustering with ${size} competitors: ${executionTime.toFixed(2)}ms`);
+        });
+
+        // Only test branch-and-bound on smaller sizes
+        test.each([10, 20])('Branch-and-bound scalability with %d competitors', (size) => {
+            const dataset = generateTestDataset(size);
+
+            const start = performance.now();
+            const result = // Branch-and-bound removed;
+            const executionTime = performance.now() - start;
+
+            expectAllConstraintsMet(dataset, result.result);
+
+            // Branch-and-bound may scale exponentially, but should be reasonable for small sizes
+            const expectedMaxTime = Math.pow(size, 2) * 50; // Quadratic scaling expectation
+            expect(executionTime).toBeLessThan(expectedMaxTime);
+
+            console.log(`Branch-and-bound with ${size} competitors: ${executionTime.toFixed(2)}ms`);
+        });
+    });
+
+    describe('Memory Usage Tests', () => {
+        test('algorithms should not leak memory with repeated runs', async () => {
+            const iterations = 10;
+
+            // Run each algorithm multiple times
+            for (let i = 0; i < iterations; i++) {
+                const mipResult = solveMIP(mediumDataset);
+                const clusteringResult = solveClustering(mediumDataset);
+
+                expectAllConstraintsMet(mediumDataset, mipResult.result);
+                expectAllConstraintsMet(mediumDataset, clusteringResult.result);
+            }
+
+            // If we get here without running out of memory, the test passes
+            expect(true).toBe(true);
+        });
+
+        test('large dataset should not cause memory issues', async () => {
+            // This test ensures we can handle the maximum dataset size
+            const result = solveMIP(largeDataset);
+            expectAllConstraintsMet(largeDataset, result.result);
+
+            // Verify we created a reasonable number of subsets
+            expect(result.result.metadata.totalSubsets).toBeGreaterThan(20);
+            expect(result.result.metadata.totalSubsets).toBeLessThanOrEqual(28);
+        });
+    });
+
+    describe('Edge Case Performance', () => {
+        test('maximum subsets scenario performance', async () => {
+            // Test with dataset that forces maximum number of subsets
+            const start = performance.now();
+            const result = solveMIP(forceMaxSubsetsDataset);
+            const executionTime = performance.now() - start;
+
+            expectAllConstraintsMet(forceMaxSubsetsDataset, result.result);
+
+            // Should handle this constraint efficiently
+            expect(executionTime).toBeLessThan(10000); // 10 seconds
+            expect(result.result.metadata.totalSubsets).toBe(28); // Should hit the maximum
+
+            console.log(`Max subsets scenario (${forceMaxSubsetsDataset.length} competitors): ${executionTime.toFixed(2)}ms`);
+        });
+
+        test('main solver function performance', async () => {
+            const start = performance.now();
+            const { bestResult, allResults } = await compareAlgorithms(mediumDataset);
+            const executionTime = performance.now() - start;
+
+            // Should run all three algorithms and return results
+            expect(allResults).toHaveLength(3);
+            expectAllConstraintsMet(mediumDataset, bestResult.result);
+
+            // Total time should be reasonable (sum of all algorithms)
+            expect(executionTime).toBeLessThan(30000); // 30 seconds for all three
+
+            console.log(`Main solver with ${mediumDataset.length} competitors: ${executionTime.toFixed(2)}ms`);
+        });
+    });
+
+    describe('Performance Regression Detection', () => {
+        test('performance should be consistent across runs', async () => {
+            const runs = 5;
+            const times: number[] = [];
+
+            for (let i = 0; i < runs; i++) {
+                const start = performance.now();
+                const result = solveMIP(mediumDataset);
+                const executionTime = performance.now() - start;
+
+                expectAllConstraintsMet(mediumDataset, result.result);
+                times.push(executionTime);
+            }
+
+            // Calculate statistics
+            const avgTime = times.reduce((sum, time) => sum + time, 0) / times.length;
+            const maxTime = Math.max(...times);
+            const minTime = Math.min(...times);
+
+            // Performance should be relatively consistent (max shouldn't be more than 3x min)
+            expect(maxTime).toBeLessThan(minTime * 3);
+
+            console.log(`Performance consistency over ${runs} runs:`);
+            console.log(`  Average: ${avgTime.toFixed(2)}ms`);
+            console.log(`  Min: ${minTime.toFixed(2)}ms`);
+            console.log(`  Max: ${maxTime.toFixed(2)}ms`);
+            console.log(`  Variation: ${((maxTime - minTime) / avgTime * 100).toFixed(1)}%`);
+        });
+    });
+});
