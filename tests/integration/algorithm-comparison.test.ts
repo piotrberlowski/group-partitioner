@@ -107,15 +107,13 @@ describe('Algorithm Comparison Integration Tests', () => {
     });
 
     describe('Edge Cases', () => {
-        test('all algorithms should handle minimum dataset', () => {
+        test('all algorithms leave fewer than 3 competitors off a target', () => {
             const results = runAllAlgorithms(minimumDataset);
 
-            expectAllConstraintsMet(minimumDataset, results.mip.result);
-            expectAllConstraintsMet(minimumDataset, results.clustering.result);
-
-            // Should produce exactly 1 subset
-            expect(results.mip.result.metadata.totalSubsets).toBe(1);
-            expect(results.clustering.result.metadata.totalSubsets).toBe(1);
+            expect(results.mip.result.subsets).toEqual([]);
+            expect(results.clustering.result.subsets).toEqual([]);
+            expect(results.mip.result.metadata.totalSubsets).toBe(0);
+            expect(results.clustering.result.metadata.totalSubsets).toBe(0);
         });
 
         test('all algorithms should handle homogeneous dataset', () => {

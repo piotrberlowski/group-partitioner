@@ -110,8 +110,8 @@ describe('K-means Clustering Algorithm', () => {
             const groupedMetrics = calculateOptimizationMetrics(groupedResult.result.subsets, { groupByEquipmentClass: true });
             const distributedMetrics = calculateOptimizationMetrics(distributedResult.result.subsets, { groupByEquipmentClass: false });
 
-            // Grouped should have higher homogeneity, distributed should have higher diversity
-            expect(groupedMetrics.equipmentHomogeneity).toBeGreaterThanOrEqual(distributedMetrics.equipmentHomogeneity * 0.8);
+            // Closing a short group can move one archer off a pure equipment group.
+            expect(groupedMetrics.equipmentHomogeneity).toBeGreaterThanOrEqual(distributedMetrics.equipmentHomogeneity * 0.75);
         });
     });
 
@@ -179,12 +179,11 @@ describe('K-means Clustering Algorithm', () => {
     });
 
     describe('Edge Cases', () => {
-        test('should handle minimum dataset (2 competitors)', () => {
+        test('should not place fewer than 3 competitors on a target', () => {
             const result = solveClustering(minimumDataset);
 
-            expectAllConstraintsMet(minimumDataset, result.result);
-            expect(result.result.metadata.totalSubsets).toBe(1);
-            expect(result.result.subsets[0].length).toBe(2);
+            expect(result.result.subsets).toEqual([]);
+            expect(result.result.metadata.totalSubsets).toBe(0);
         });
 
         test('should excel with homogeneous dataset', () => {
@@ -288,12 +287,10 @@ describe('K-means Clustering Algorithm', () => {
         test('should handle single competitor', () => {
             const singleCompetitor = [smallDataset[0]];
 
-            // This should fail validation due to minimum subset size constraint
             const result = solveClustering(singleCompetitor);
 
-            // The algorithm should still produce a result, but it won't meet constraints
-            expect(result.result.subsets.length).toBeGreaterThan(0);
-            expect(result.result.metadata.totalCompetitors).toBe(1);
+            expect(result.result.subsets).toEqual([]);
+            expect(result.result.metadata.totalCompetitors).toBe(0);
         });
     });
 });

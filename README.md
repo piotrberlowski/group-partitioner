@@ -5,7 +5,7 @@ A TypeScript library for competitor partitioning algorithms, designed to be inte
 ## Features
 
 - **Multiple Algorithm Approaches**: Mixed Integer Programming (Greedy & HiGHS), K-means Clustering
-- **Flexible Constraints**: Configurable subset sizes (2-6 competitors, prefer 4)
+- **Flexible Constraints**: Configurable subset sizes (3-6 competitors, prefer 4). A target is never size 1 or 2.
 - **Guardian Constraint Enforcement**: Competitors must be in the same subset as their guardians
 - **Multiple Optimization Criteria**: 
   - Even gender distribution within subsets
@@ -108,7 +108,7 @@ interface PartitionOptions {
   groupByEquipmentClass: boolean;
   /** Maximum number of subsets allowed (default: 28) */
   maxSubsets?: number;
-  /** Minimum subset size (default: 2) */
+  /** Minimum subset size. Below 3 is raised to 3 (default: 3) */
   minSubsetSize?: number;
   /** Maximum subset size (default: 6) */
   maxSubsetSize?: number;
@@ -120,6 +120,10 @@ interface PartitionOptions {
   ageCategoryWeight?: number;
   /** Weight for equipment class grouping preference (default: 1.0) */
   equipmentClassWeight?: number;
+  /** Extra weight for subsets that are exactly preferredSubsetSize (default: 0) */
+  closedGroupWeight?: number;
+  /** Host labels for bowstyle, age, and gender. Defaults to the built-in IFAA lists. */
+  solutionSpace?: SolutionSpace;
 }
 ```
 
@@ -128,10 +132,10 @@ interface PartitionOptions {
 ```typescript
 interface Competitor {
   id: string;
-  equipmentClass: EquipmentClass; // HB, LB, TR, BHR, BBR, FSR, BBC, BL, BU, FSC, FU
-  ageCategory: AgeGroup;          // C, J, YA, A, V, S
-  gender: Gender;                 // F, M
-  guardianId?: string;            // Reference to another competitor who is the guardian
+  equipmentClass: string; // IFAA code, or any label listed in solutionSpace
+  ageCategory: string;    // IFAA age code, or any label listed in solutionSpace
+  gender: string;         // F, M, or any label listed in solutionSpace
+  guardianId?: string;    // Reference to another competitor who is the guardian
 }
 ```
 
@@ -203,6 +207,7 @@ interface PartitionResult {
     averageSubsetSize: number;
     scoreBreakdown: {
       sizeScore: number;
+      closedGroupScore: number;
       genderScore: number;
       ageCategoryScore: number;
       equipmentClassScore: number;
@@ -234,7 +239,9 @@ const autoResult = await solve(competitors, { algorithm: 'auto' });     // Auto-
 
 ### Special Constraints
 
-- **≤112 competitors**: Maximum subset size automatically limited to 4 competitors
+- **≤112 competitors**: When `maxSubsetSize` is omitted, maximum subset size is limited to 4. An explicit `maxSubsetSize` is kept.
+- **Closed groups**: Raise `closedGroupWeight` to prefer subsets of exactly `preferredSubsetSize`. Gender, age, and equipment weights still trade off inside that size.
+- **No short targets**: Subset size is at least 3. A leftover archer is not placed on a target of 1 or 2.
 - **Guardian relationships**: Automatically preserved across all algorithms
 - **Maximum 28 subsets**: Hard limit enforced by all algorithms
 
@@ -312,6 +319,17 @@ npm run type-check
 - **MIP Solver**: Fast greedy heuristic, good for large datasets
 - **K-means Clustering**: Balanced approach, handles feature similarity well
 - **Branch-and-bound**: Most thorough search, best for smaller datasets (<50 competitors)
+
+## Release
+
+The package name `group-planner` is unscoped. `prepublishOnly` cleans and builds `dist` before publish:
+
+```bash
+npm test
+npm publish
+```
+
+Installing from git runs `prepare`, which builds `dist` as well.
 
 ## License
 

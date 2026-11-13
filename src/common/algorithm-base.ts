@@ -4,6 +4,7 @@
 
 import type { Competitor, PartitionOptions, AlgorithmResult } from '../types';
 import { createPartitionResult } from '../utils';
+import { retainLegalSubsets, smallestAllowedSubset } from '../subsetSize';
 import { validateAndSanitizeOptions, ValidatedPartitionOptions } from './options-validator';
 
 /**
@@ -33,9 +34,10 @@ export function createAlgorithmResult(
     startTime: number
 ): AlgorithmResult {
     const executionTime = performance.now() - startTime;
+    const legalSubsets = retainLegalSubsets(subsets, options.minSubsetSize, options.maxSubsetSize);
 
     return {
-        result: createPartitionResult(subsets, options),
+        result: createPartitionResult(legalSubsets, options),
         executionTime,
         algorithmUsed: algorithmName,
     };
@@ -70,8 +72,9 @@ export function validateAlgorithmSolution(
     // Check subset size constraints
     for (let i = 0; i < subsets.length; i++) {
         const size = subsets[i].length;
-        if (size < options.minSubsetSize) {
-            errors.push(`Subset ${i} too small: ${size} < ${options.minSubsetSize}`);
+        const minimum = smallestAllowedSubset(options.minSubsetSize);
+        if (size < minimum) {
+            errors.push(`Subset ${i} too small: ${size} < ${minimum}`);
         }
         if (size > options.maxSubsetSize) {
             errors.push(`Subset ${i} too large: ${size} > ${options.maxSubsetSize}`);

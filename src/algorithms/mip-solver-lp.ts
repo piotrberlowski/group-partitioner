@@ -8,10 +8,19 @@
  */
 
 import type { Competitor, PartitionOptions, AlgorithmResult } from '../types';
-import { DEFAULT_OPTIONS, createPartitionResult, createGuardianFamilies } from '../utils';
+import { createPartitionResult, createGuardianFamilies } from '../utils';
+import { retainLegalSubsets } from '../subsetSize';
+import { validateAndSanitizeOptions, type ValidatedPartitionOptions } from '../common/options-validator';
 
 // Import HiGHS solver
-const highs = require('highs');
+type HighsSolver = {
+    solve: (model: string) => { Status: string; Columns: Record<string, { Primal: number }> };
+};
+
+function loadHighs(): Promise<HighsSolver> {
+    const highs = require('highs') as () => Promise<HighsSolver>;
+    return highs();
+}
 
 interface HiGHSVariable {
     name: string;
@@ -40,16 +49,13 @@ interface HiGHSModel {
 class HiGHSMIPSolver {
     private competitors: Competitor[];
     private families: Competitor[][];
-    private options: Required<PartitionOptions>;
+    private options: ValidatedPartitionOptions;
     private maxSubsets: number;
 
-    constructor(competitors: Competitor[], options: Required<PartitionOptions>) {
+    constructor(competitors: Competitor[], options: ValidatedPartitionOptions) {
         this.competitors = competitors;
         this.families = createGuardianFamilies(competitors);
-        // Special constraint: if ≤112 competitors, max subset size is 4
-        this.options = competitors.length <= 112
-            ? { ...options, maxSubsetSize: Math.min(options.maxSubsetSize, 4) }
-            : options;
+        this.options = options;
         this.maxSubsets = Math.min(this.options.maxSubsets, Math.ceil(competitors.length / this.options.minSubsetSize));
     }
 
@@ -185,7 +191,7 @@ class HiGHSMIPSolver {
 
         // Size preference: prefer assignments that help achieve preferred subset size
         if (familySize === this.options.preferredSubsetSize) {
-            coefficient += 5; // Bonus for preferred size families
+            coefficient += 5 + (10 * this.options.closedGroupWeight);
         } else if (familySize <= this.options.preferredSubsetSize) {
             coefficient += 3; // Smaller bonus for smaller families
         }
@@ -228,7 +234,7 @@ class HiGHSMIPSolver {
         const lpModel = this.convertToLPFormat(model);
 
         // Initialize HiGHS module and solve
-        const solver = await highs();
+        const solver = await loadHighs();
         const solution = solver.solve(lpModel);
 
         // Debug: log solution status
@@ -404,7 +410,7 @@ export async function solveMIPWithLP(
     options: Partial<PartitionOptions> = {}
 ): Promise<AlgorithmResult> {
     const startTime = performance.now();
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const opts = validateAndSanitizeOptions(options, competitors.length);
 
     if (competitors.length === 0) {
         return {
@@ -418,7 +424,8 @@ export async function solveMIPWithLP(
     const solver = new HiGHSMIPSolver(competitors, opts);
     const subsets = await solver.solve();
 
-    const result = createPartitionResult(subsets, opts);
+    const legalSubsets = retainLegalSubsets(subsets, opts.minSubsetSize, opts.maxSubsetSize);
+    const result = createPartitionResult(legalSubsets, opts);
     const executionTime = performance.now() - startTime;
 
     return {

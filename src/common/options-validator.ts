@@ -4,9 +4,10 @@
  */
 
 import type { PartitionOptions } from '../types';
-import { DEFAULT_OPTIONS } from '../utils';
+import { MINIMUM_SUBSET_SIZE } from '../subsetSize';
+import { DEFAULT_OPTIONS, type ResolvedPartitionOptions } from '../utils';
 
-export interface ValidatedPartitionOptions extends Required<PartitionOptions> {
+export interface ValidatedPartitionOptions extends ResolvedPartitionOptions {
     // All properties are required and validated
 }
 
@@ -20,40 +21,59 @@ export function validateAndSanitizeOptions(
     options: Partial<PartitionOptions>,
     competitorCount: number
 ): ValidatedPartitionOptions {
-    // Merge with defaults first
-    let sanitizedOptions = { ...DEFAULT_OPTIONS, ...options };
-
-    // Fix invalid size constraints by swapping if necessary
-    if (sanitizedOptions.minSubsetSize > sanitizedOptions.maxSubsetSize) {
-        const temp = sanitizedOptions.minSubsetSize;
-        sanitizedOptions.minSubsetSize = sanitizedOptions.maxSubsetSize;
-        sanitizedOptions.maxSubsetSize = temp;
-    }
-
-    // Ensure minimum size is at least 2
-    if (sanitizedOptions.minSubsetSize < 2) {
-        sanitizedOptions.minSubsetSize = 2;
-    }
-
-    // Ensure maximum size is at least equal to minimum
-    if (sanitizedOptions.maxSubsetSize < sanitizedOptions.minSubsetSize) {
-        sanitizedOptions.maxSubsetSize = sanitizedOptions.minSubsetSize;
-    }
-
-    // Ensure preferred size is within bounds
-    if (sanitizedOptions.preferredSubsetSize < sanitizedOptions.minSubsetSize) {
-        sanitizedOptions.preferredSubsetSize = sanitizedOptions.minSubsetSize;
-    }
-    if (sanitizedOptions.preferredSubsetSize > sanitizedOptions.maxSubsetSize) {
-        sanitizedOptions.preferredSubsetSize = sanitizedOptions.maxSubsetSize;
-    }
-
-    // Special constraint: if ≤112 competitors, max subset size is 4
-    if (competitorCount <= 112) {
-        sanitizedOptions.maxSubsetSize = Math.min(sanitizedOptions.maxSubsetSize, 4);
+    const explicitMax = options.maxSubsetSize !== undefined && options.maxSubsetSize >= MINIMUM_SUBSET_SIZE;
+    const sanitizedOptions = { ...DEFAULT_OPTIONS, ...options };
+    swapInvertedSizes(sanitizedOptions);
+    applySizeFloors(sanitizedOptions);
+    applyDefaultFieldCap(sanitizedOptions, explicitMax, competitorCount);
+    clampPreferredSize(sanitizedOptions);
+    if (sanitizedOptions.closedGroupWeight < 0) {
+        sanitizedOptions.closedGroupWeight = 0;
     }
 
     return sanitizedOptions;
+}
+
+function swapInvertedSizes(options: ResolvedPartitionOptions): void {
+    if (options.minSubsetSize <= options.maxSubsetSize) {
+        return;
+    }
+    const previousMin = options.minSubsetSize;
+    options.minSubsetSize = options.maxSubsetSize;
+    options.maxSubsetSize = previousMin;
+}
+
+function applySizeFloors(options: ResolvedPartitionOptions): void {
+    if (options.minSubsetSize < MINIMUM_SUBSET_SIZE) {
+        options.minSubsetSize = MINIMUM_SUBSET_SIZE;
+    }
+    if (options.maxSubsetSize < options.minSubsetSize) {
+        options.maxSubsetSize = options.minSubsetSize;
+    }
+}
+
+function applyDefaultFieldCap(
+    options: ResolvedPartitionOptions,
+    explicitMax: boolean,
+    competitorCount: number
+): void {
+    const useFieldCap = !explicitMax && competitorCount > 0 && competitorCount <= 112;
+    if (!useFieldCap) {
+        return;
+    }
+    options.maxSubsetSize = Math.min(options.maxSubsetSize, 4);
+    if (options.maxSubsetSize < options.minSubsetSize) {
+        options.maxSubsetSize = options.minSubsetSize;
+    }
+}
+
+function clampPreferredSize(options: ResolvedPartitionOptions): void {
+    if (options.preferredSubsetSize < options.minSubsetSize) {
+        options.preferredSubsetSize = options.minSubsetSize;
+    }
+    if (options.preferredSubsetSize > options.maxSubsetSize) {
+        options.preferredSubsetSize = options.maxSubsetSize;
+    }
 }
 
 /**

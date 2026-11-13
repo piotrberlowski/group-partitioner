@@ -33,7 +33,7 @@ const exampleCompetitors: Competitor[] = [
 const options: PartitionOptions = {
     groupByEquipmentClass: true,
     maxSubsets: 28,
-    minSubsetSize: 2,
+    minSubsetSize: 3,
     maxSubsetSize: 6,
     preferredSubsetSize: 4,
     genderWeight: 1.0,

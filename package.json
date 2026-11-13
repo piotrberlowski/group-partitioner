@@ -1,7 +1,15 @@
 {
     "name": "group-planner",
-    "version": "0.1.0",
-    "description": "A TypeScript library for group planning functionality",
+    "version": "0.2.0",
+    "description": "Partition competitors into groups by equipment, age, and gender",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/piotrberlowski/group-partitioner.git"
+    },
+    "bugs": {
+        "url": "https://github.com/piotrberlowski/group-partitioner/issues"
+    },
+    "homepage": "https://github.com/piotrberlowski/group-partitioner#readme",
     "main": "dist/index.js",
     "module": "dist/index.mjs",
     "types": "dist/index.d.ts",
@@ -23,6 +31,7 @@
         "test:watch": "jest --watch",
         "test:coverage": "jest --coverage",
         "clean": "rm -rf dist",
+        "prepare": "npm run build",
         "prepublishOnly": "npm run clean && npm run build"
     },
     "keywords": [
