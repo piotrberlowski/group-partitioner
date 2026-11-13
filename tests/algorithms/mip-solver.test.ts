@@ -148,12 +148,11 @@ describe('MIP Solver', () => {
     });
 
     describe('Edge Cases', () => {
-        test('should handle minimum dataset (2 competitors)', () => {
+        test('should not place fewer than 3 competitors on a target', () => {
             const result = solveMIP(minimumDataset);
 
-            expectAllConstraintsMet(minimumDataset, result.result);
-            expect(result.result.metadata.totalSubsets).toBe(1);
-            expect(result.result.subsets[0].length).toBe(2);
+            expect(result.result.subsets).toEqual([]);
+            expect(result.result.metadata.totalSubsets).toBe(0);
         });
 
         test('should handle homogeneous dataset', () => {

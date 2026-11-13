@@ -16,6 +16,7 @@ export type {
     AgeGroup,
     Gender,
     Algorithm,
+    SolutionSpace,
 } from './types';
 
 // Utility functions
@@ -30,6 +31,8 @@ export {
     validateCompetitors,
     DEFAULT_OPTIONS,
 } from './utils';
+
+export { MINIMUM_SUBSET_SIZE, retainLegalSubsets, smallestAllowedSubset } from './subsetSize';
 
 // Constants and validation
 export {

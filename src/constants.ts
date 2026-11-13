@@ -81,22 +81,22 @@ export const GENDER_DESCRIPTIONS: Record<Gender, string> = {
 /**
  * Checks if a value is a valid equipment class
  */
-export function isValidEquipmentClass(value: string): value is EquipmentClass {
-    return EQUIPMENT_CLASSES.includes(value as EquipmentClass);
+export function isValidEquipmentClass(value: string, allowed?: readonly string[]): boolean {
+    return (allowed ?? EQUIPMENT_CLASSES).includes(value);
 }
 
 /**
  * Checks if a value is a valid age group
  */
-export function isValidAgeGroup(value: string): value is AgeGroup {
-    return AGE_GROUPS.includes(value as AgeGroup);
+export function isValidAgeGroup(value: string, allowed?: readonly string[]): boolean {
+    return (allowed ?? AGE_GROUPS).includes(value);
 }
 
 /**
  * Checks if a value is a valid gender
  */
-export function isValidGender(value: string): value is Gender {
-    return GENDERS.includes(value as Gender);
+export function isValidGender(value: string, allowed?: readonly string[]): boolean {
+    return (allowed ?? GENDERS).includes(value);
 }
 
 /**

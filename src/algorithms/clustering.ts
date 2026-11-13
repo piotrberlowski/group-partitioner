@@ -83,7 +83,7 @@ function calculateDistance(features1: number[], features2: number[]): number {
 function calculateWeightedDistance(
     features1: number[],
     features2: number[],
-    options: Required<PartitionOptions>,
+    options: ValidatedPartitionOptions,
     featureWeights: { genderStart: number; ageStart: number; equipmentStart: number }
 ): number {
     let sum = 0;
@@ -113,7 +113,7 @@ function calculateWeightedDistance(
 function initializeClusterCenters(
     familyFeatures: FamilyFeatures[],
     numClusters: number,
-    options: Required<PartitionOptions>
+    options: ValidatedPartitionOptions
 ): ClusterCenter[] {
     const centers: ClusterCenter[] = [];
     const families = [...familyFeatures];
@@ -194,7 +194,7 @@ function createFamilyFeatures(families: Competitor[][], allCompetitors: Competit
 function assignToClusters(
     familyFeatures: FamilyFeatures[],
     centers: ClusterCenter[],
-    options: Required<PartitionOptions>,
+    options: ValidatedPartitionOptions,
     featureWeights: { genderStart: number; ageStart: number; equipmentStart: number }
 ): void {
     // Clear previous assignments
@@ -264,7 +264,7 @@ function updateClusterCenters(centers: ClusterCenter[]): boolean {
  */
 function adjustClusterSizes(
     centers: ClusterCenter[],
-    options: Required<PartitionOptions>,
+    options: ValidatedPartitionOptions,
     maxAllowedClusters?: number
 ): ClusterCenter[] {
     const effectiveMaxSubsets = maxAllowedClusters || options.maxSubsets;
@@ -411,9 +411,39 @@ function adjustClusterSizes(
                 }
             }
         }
+
+        if (!placed && redistributeFamilies.length > 0) {
+            const family = redistributeFamilies.shift()!;
+            placeFamilyInSmallestCenter(validCenters, family);
+        }
     }
 
     return validCenters;
+}
+
+function placeFamilyInSmallestCenter(
+    validCenters: ClusterCenter[],
+    family: FamilyFeatures
+): void {
+    if (validCenters.length === 0) {
+        validCenters.push({ id: 0, features: [...family.features], members: [family] });
+        return;
+    }
+
+    let smallestCenter = validCenters[0];
+    let smallestSize = centerSize(smallestCenter);
+    for (const center of validCenters) {
+        const size = centerSize(center);
+        if (size < smallestSize) {
+            smallestCenter = center;
+            smallestSize = size;
+        }
+    }
+    smallestCenter.members.push(family);
+}
+
+function centerSize(center: ClusterCenter): number {
+    return center.members.reduce((sum, family) => sum + family.family.length, 0);
 }
 
 /**

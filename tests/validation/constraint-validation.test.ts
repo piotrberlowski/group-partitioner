@@ -11,7 +11,6 @@ import { smallDataset } from '../data/small-dataset';
 import { mediumDataset } from '../data/medium-dataset';
 import { largeDataset } from '../data/large-dataset';
 import {
-    minimumDataset,
     homogeneousDataset,
     diverseDataset,
     largeGuardianFamily,
@@ -39,7 +38,7 @@ describe('Constraint Validation Tests', () => {
 
     describe('Basic Constraint Validation', () => {
         test('all competitors must be assigned exactly once', () => {
-            const datasets = [smallDataset, mediumDataset, minimumDataset, homogeneousDataset];
+            const datasets = [smallDataset, mediumDataset, homogeneousDataset];
 
             datasets.forEach((dataset, index) => {
                 const results = testAllAlgorithms(dataset, `dataset-${index}`);
@@ -86,8 +85,8 @@ describe('Constraint Validation Tests', () => {
                     for (let i = 0; i < result.result.subsets.length; i++) {
                         const subset = result.result.subsets[i];
 
-                        // Minimum size constraint
-                        expect(subset.length).toBeGreaterThanOrEqual(2);
+                        // Minimum size constraint. Size 1 and 2 are not targets.
+                        expect(subset.length).toBeGreaterThanOrEqual(3);
 
                         // Maximum size constraint
                         expect(subset.length).toBeLessThanOrEqual(6);
@@ -190,7 +189,6 @@ describe('Constraint Validation Tests', () => {
                 { name: 'small', data: smallDataset },
                 { name: 'medium', data: mediumDataset },
                 { name: 'large', data: largeDataset },
-                { name: 'minimum', data: minimumDataset },
                 { name: 'homogeneous', data: homogeneousDataset },
                 { name: 'diverse', data: diverseDataset },
                 { name: 'large-family', data: largeGuardianFamily },
@@ -320,13 +318,13 @@ describe('Constraint Validation Tests', () => {
                 expect(result.result.metadata.totalCompetitors).toBe(0);
             });
 
-            // Single competitor (violates minimum subset size but should handle gracefully)
+            // Fewer than 3 competitors cannot form a target.
             const singleCompetitor = [smallDataset[0]];
             const singleResults = testAllAlgorithms(singleCompetitor, 'single-test');
             Object.entries(singleResults).forEach(([algorithmName, result]) => {
                 if (!result) return;
-                expect(result.result.metadata.totalCompetitors).toBe(1);
-                expect(result.result.subsets.length).toBeGreaterThan(0);
+                expect(result.result.subsets).toEqual([]);
+                expect(result.result.metadata.totalCompetitors).toBe(0);
             });
         });
 

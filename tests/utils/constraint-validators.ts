@@ -54,9 +54,10 @@ export function validateAllConstraints(
     // 3. Detailed size constraint validation
     for (let i = 0; i < result.subsets.length; i++) {
         const subset = result.subsets[i];
-        if (subset.length < opts.minSubsetSize) {
+        const minimum = Math.max(3, opts.minSubsetSize);
+        if (subset.length < minimum) {
             sizeConstraints = false;
-            errors.push(`Size: Subset ${i + 1} too small (${subset.length} < ${opts.minSubsetSize})`);
+            errors.push(`Size: Subset ${i + 1} too small (${subset.length} < ${minimum})`);
         }
         if (subset.length > opts.maxSubsetSize) {
             sizeConstraints = false;

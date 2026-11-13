@@ -2,22 +2,28 @@
  * Utility functions for competitor partitioning
  */
 
-import type { Competitor, PartitionOptions, PartitionResult } from './types';
+import type { Competitor, PartitionOptions, PartitionResult, SolutionSpace } from './types';
 import { isValidEquipmentClass, isValidAgeGroup, isValidGender } from './constants';
+import { smallestAllowedSubset } from './subsetSize';
+
+export type ResolvedPartitionOptions = Omit<Required<PartitionOptions>, 'solutionSpace'> & {
+    solutionSpace?: SolutionSpace;
+};
 
 /**
  * Default partition options
  */
-export const DEFAULT_OPTIONS: Required<PartitionOptions> = {
+export const DEFAULT_OPTIONS: ResolvedPartitionOptions = {
     algorithm: 'auto',
     groupByEquipmentClass: true,
     maxSubsets: 28,
-    minSubsetSize: 2,
+    minSubsetSize: 3,
     maxSubsetSize: 6,
     preferredSubsetSize: 4,
     genderWeight: 1.0,
     ageCategoryWeight: 1.0,
     equipmentClassWeight: 1.0,
+    closedGroupWeight: 0,
 };
 
 /**
@@ -49,8 +55,9 @@ export function validatePartition(
     // Check subset size constraints
     for (let i = 0; i < subsets.length; i++) {
         const size = subsets[i].length;
-        if (size < opts.minSubsetSize) {
-            errors.push(`Subset ${i} too small: ${size} < ${opts.minSubsetSize}`);
+        const minimum = smallestAllowedSubset(opts.minSubsetSize);
+        if (size < minimum) {
+            errors.push(`Subset ${i} too small: ${size} < ${minimum}`);
         }
         if (size > opts.maxSubsetSize) {
             errors.push(`Subset ${i} too large: ${size} > ${opts.maxSubsetSize}`);
@@ -69,6 +76,79 @@ export function validatePartition(
     return { valid: errors.length === 0, errors };
 }
 
+export type SubsetScore = {
+    size: number;
+    closedGroup: number;
+    gender: number;
+    ageCategory: number;
+    equipmentClass: number;
+    total: number;
+};
+
+function mean(total: number, count: number): number {
+    return count === 0 ? 0 : total / count;
+}
+
+function countLabels(subset: Competitor[], label: (competitor: Competitor) => string): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const competitor of subset) {
+        const key = label(competitor);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+}
+
+function largestShare(counts: Map<string, number>, size: number): number {
+    return Math.max(...counts.values()) / size;
+}
+
+function evenShare(counts: Map<string, number>, size: number): number {
+    let even = 0;
+    for (const count of counts.values()) {
+        if (count % 2 === 0) {
+            even += count;
+        }
+    }
+    return even / size;
+}
+
+function equipmentPoints(subset: Competitor[], options: ResolvedPartitionOptions): number {
+    const counts = countLabels(subset, (competitor) => competitor.equipmentClass);
+    const size = subset.length;
+    if (options.groupByEquipmentClass) {
+        return largestShare(counts, size) * 10 * options.equipmentClassWeight;
+    }
+    return (counts.size / Math.min(size, 3)) * 10 * options.equipmentClassWeight;
+}
+
+/**
+ * Score one subset. The greedy solver uses this while it fills groups.
+ */
+export function scoreSubset(
+    subset: Competitor[],
+    options: Partial<PartitionOptions> = {}
+): SubsetScore {
+    if (subset.length === 0) {
+        return { size: 0, closedGroup: 0, gender: 0, ageCategory: 0, equipmentClass: 0, total: 0 };
+    }
+
+    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const size = subset.length;
+    const sizeScore = Math.max(0, 10 - Math.abs(size - opts.preferredSubsetSize) * 2);
+    const closedGroup = size === opts.preferredSubsetSize ? 10 * opts.closedGroupWeight : 0;
+    const gender = evenShare(countLabels(subset, (competitor) => competitor.gender), size) * 10 * opts.genderWeight;
+    const ageCategory = largestShare(countLabels(subset, (competitor) => competitor.ageCategory), size) * 10 * opts.ageCategoryWeight;
+    const equipmentClass = equipmentPoints(subset, opts);
+    return {
+        size: sizeScore,
+        closedGroup,
+        gender,
+        ageCategory,
+        equipmentClass,
+        total: sizeScore + closedGroup + gender + ageCategory + equipmentClass,
+    };
+}
+
 /**
  * Calculates the quality score for a partition solution
  */
@@ -76,71 +156,32 @@ export function calculateScore(
     subsets: Competitor[][],
     options: Partial<PartitionOptions> = {}
 ): { score: number; breakdown: PartitionResult['metadata']['scoreBreakdown'] } {
-    const opts = { ...DEFAULT_OPTIONS, ...options };
-
-    let sizeScore = 0;
-    let genderScore = 0;
-    let ageCategoryScore = 0;
-    let equipmentClassScore = 0;
-
-    const totalSubsets = subsets.length;
+    const totals = { size: 0, closedGroup: 0, gender: 0, ageCategory: 0, equipmentClass: 0 };
 
     for (const subset of subsets) {
-        const size = subset.length;
-
-        // Size preference score (prefer size of 4, penalize deviation)
-        const sizeDeviation = Math.abs(size - opts.preferredSubsetSize);
-        sizeScore += Math.max(0, 10 - sizeDeviation * 2);
-
-        // Gender balance score (prefer even numbers of same gender)
-        const genderCounts = new Map<string, number>();
-        for (const competitor of subset) {
-            genderCounts.set(competitor.gender, (genderCounts.get(competitor.gender) || 0) + 1);
-        }
-
-        let genderBalance = 0;
-        for (const count of genderCounts.values()) {
-            if (count % 2 === 0) genderBalance += count;
-        }
-        genderScore += (genderBalance / size) * 10;
-
-        // Age category homogeneity score
-        const ageCategoryCounts = new Map<string, number>();
-        for (const competitor of subset) {
-            ageCategoryCounts.set(competitor.ageCategory, (ageCategoryCounts.get(competitor.ageCategory) || 0) + 1);
-        }
-
-        const maxAgeCount = Math.max(...ageCategoryCounts.values());
-        ageCategoryScore += (maxAgeCount / size) * 10;
-
-        // Equipment class score (either homogeneity or distribution based on preference)
-        const equipmentCounts = new Map<string, number>();
-        for (const competitor of subset) {
-            equipmentCounts.set(competitor.equipmentClass, (equipmentCounts.get(competitor.equipmentClass) || 0) + 1);
-        }
-
-        if (opts.groupByEquipmentClass) {
-            // Prefer homogeneous equipment classes
-            const maxEquipmentCount = Math.max(...equipmentCounts.values());
-            equipmentClassScore += (maxEquipmentCount / size) * 10;
-        } else {
-            // Prefer diverse equipment classes
-            const uniqueEquipmentCount = equipmentCounts.size;
-            equipmentClassScore += (uniqueEquipmentCount / Math.min(size, 3)) * 10; // Cap at 3 for reasonable diversity
-        }
+        const parts = scoreSubset(subset, options);
+        totals.size += parts.size;
+        totals.closedGroup += parts.closedGroup;
+        totals.gender += parts.gender;
+        totals.ageCategory += parts.ageCategory;
+        totals.equipmentClass += parts.equipmentClass;
     }
 
-    // Average scores across all subsets
     const breakdown = {
-        sizeScore: sizeScore / totalSubsets,
-        genderScore: (genderScore / totalSubsets) * opts.genderWeight,
-        ageCategoryScore: (ageCategoryScore / totalSubsets) * opts.ageCategoryWeight,
-        equipmentClassScore: (equipmentClassScore / totalSubsets) * opts.equipmentClassWeight,
+        sizeScore: mean(totals.size, subsets.length),
+        closedGroupScore: mean(totals.closedGroup, subsets.length),
+        genderScore: mean(totals.gender, subsets.length),
+        ageCategoryScore: mean(totals.ageCategory, subsets.length),
+        equipmentClassScore: mean(totals.equipmentClass, subsets.length),
     };
 
-    const totalScore = breakdown.sizeScore + breakdown.genderScore + breakdown.ageCategoryScore + breakdown.equipmentClassScore;
+    const score = breakdown.sizeScore
+        + breakdown.closedGroupScore
+        + breakdown.genderScore
+        + breakdown.ageCategoryScore
+        + breakdown.equipmentClassScore;
 
-    return { score: totalScore, breakdown };
+    return { score, breakdown };
 }
 
 /**
@@ -159,7 +200,7 @@ export function createPartitionResult(
         metadata: {
             totalCompetitors,
             totalSubsets: subsets.length,
-            averageSubsetSize: totalCompetitors / subsets.length,
+            averageSubsetSize: subsets.length === 0 ? 0 : totalCompetitors / subsets.length,
             scoreBreakdown: breakdown,
         },
     };
@@ -299,31 +340,35 @@ export function shuffle<T>(array: T[]): T[] {
 /**
  * Validates a competitor object
  */
-export function isValidCompetitor(competitor: any): competitor is Competitor {
-    if (!competitor || typeof competitor !== 'object') {
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+export function isValidCompetitor(competitor: unknown, space?: SolutionSpace): competitor is Competitor {
+    if (!isRecord(competitor)) {
         return false;
     }
 
-    // Check required fields
-    if (typeof competitor.id !== 'string' || competitor.id.trim().length === 0) {
+    const { id, equipmentClass, ageCategory, gender, guardianId } = competitor;
+
+    if (typeof id !== 'string' || id.trim().length === 0) {
         return false;
     }
 
-    if (!isValidEquipmentClass(competitor.equipmentClass)) {
+    if (typeof equipmentClass !== 'string' || !isValidEquipmentClass(equipmentClass, space?.equipmentClasses)) {
         return false;
     }
 
-    if (!isValidAgeGroup(competitor.ageCategory)) {
+    if (typeof ageCategory !== 'string' || !isValidAgeGroup(ageCategory, space?.ageCategories)) {
         return false;
     }
 
-    if (!isValidGender(competitor.gender)) {
+    if (typeof gender !== 'string' || !isValidGender(gender, space?.genders)) {
         return false;
     }
 
     // Check optional guardian ID
-    if (competitor.guardianId !== undefined &&
-        (typeof competitor.guardianId !== 'string' || competitor.guardianId.trim().length === 0)) {
+    if (guardianId !== undefined && (typeof guardianId !== 'string' || guardianId.trim().length === 0)) {
         return false;
     }
 
@@ -333,7 +378,7 @@ export function isValidCompetitor(competitor: any): competitor is Competitor {
 /**
  * Validates an array of competitors
  */
-export function validateCompetitors(competitors: any[]): { valid: boolean; errors: string[] } {
+export function validateCompetitors(competitors: any[], space?: SolutionSpace): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
     if (!Array.isArray(competitors)) {
@@ -353,7 +398,7 @@ export function validateCompetitors(competitors: any[]): { valid: boolean; error
     // Check each competitor
     const competitorIds = new Set<string>();
     competitors.forEach((competitor, index) => {
-        if (!isValidCompetitor(competitor)) {
+        if (!isValidCompetitor(competitor, space)) {
             errors.push(`Competitor at index ${index} is invalid`);
             return;
         }

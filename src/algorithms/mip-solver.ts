@@ -8,7 +8,7 @@
  */
 
 import type { Competitor, PartitionOptions, AlgorithmResult } from '../types';
-import { createPartitionResult, validatePartition, createGuardianFamilies } from '../utils';
+import { createPartitionResult, validatePartition, createGuardianFamilies, scoreSubset, type ResolvedPartitionOptions } from '../utils';
 import { validateAndSanitizeOptions, ValidatedPartitionOptions } from '../common/options-validator';
 import { handleEmptyDataset, createAlgorithmResult } from '../common/algorithm-base';
 
@@ -25,13 +25,46 @@ interface MIPConstraint {
     name: string;
 }
 
+function openSubsetFor(
+    subsets: Competitor[][],
+    familySize: number,
+    currentSubset: number,
+    options: { maxSubsetSize: number; preferredSubsetSize: number },
+    maxSubsets: number
+): { index: number; nextSubset: number } | null {
+    const started = Math.min(currentSubset, subsets.length);
+    let bestIndex = -1;
+    let bestScore = -1;
+
+    for (let index = 0; index < started; index++) {
+        const available = options.maxSubsetSize - subsets[index].length;
+        if (available < familySize) {
+            continue;
+        }
+        const newSize = subsets[index].length + familySize;
+        const totalScore = 1000 - Math.abs(newSize - options.preferredSubsetSize) + available;
+        if (totalScore > bestScore) {
+            bestScore = totalScore;
+            bestIndex = index;
+        }
+    }
+
+    if (bestIndex >= 0) {
+        return { index: bestIndex, nextSubset: currentSubset };
+    }
+    if (currentSubset >= maxSubsets) {
+        return null;
+    }
+    return { index: currentSubset, nextSubset: currentSubset + 1 };
+}
+
 /**
  * Simple MIP solver using branch-and-bound with linear relaxation
  * Note: In production, you would use a proper MIP solver like CPLEX, Gurobi, or GLPK
  */
 class SimpleMIPSolver {
     private competitors: Competitor[];
-    private options: Required<PartitionOptions>;
+    private options: ResolvedPartitionOptions;
     private numCompetitors: number;
     private maxSubsets: number;
     private variables: MIPVariable[];
@@ -39,7 +72,7 @@ class SimpleMIPSolver {
     private bestSolution: MIPVariable[] | null = null;
     private bestObjective = -Infinity;
 
-    constructor(competitors: Competitor[], options: Required<PartitionOptions>) {
+    constructor(competitors: Competitor[], options: ResolvedPartitionOptions) {
         this.competitors = competitors;
 
         // Use common options validation
@@ -221,46 +254,21 @@ class SimpleMIPSolver {
             }
         }
 
-        // Handle remaining families that didn't fit (force them into existing subsets if possible)
+        // Place anyone still waiting into a group that is not already full.
         while (unassignedFamilies.length > 0) {
-            const family = unassignedFamilies.shift()!;
-
-            // Find best subset considering both available space and preferred size
-            let bestSubsetIndex = 0;
-            let bestScore = -1;
-
-            for (let i = 0; i < subsets.length; i++) {
-                const currentSize = subsets[i].length;
-                const newSize = currentSize + family.length;
-                const availableSpace = this.options.maxSubsetSize - currentSize;
-
-                if (availableSpace >= family.length) {
-                    // Calculate score: prefer sizes closer to preferred size
-                    const sizeScore = 1000 - Math.abs(newSize - this.options.preferredSubsetSize);
-                    const spaceScore = availableSpace; // Also consider available space
-                    const totalScore = sizeScore + spaceScore;
-
-                    if (totalScore > bestScore) {
-                        bestScore = totalScore;
-                        bestSubsetIndex = i;
-                    }
-                }
+            const family = unassignedFamilies[0];
+            const placement = openSubsetFor(subsets, family.length, currentSubset, this.options, this.maxSubsets);
+            if (!placement) {
+                break;
             }
 
-            const maxAvailableSpace = this.options.maxSubsetSize - subsets[bestSubsetIndex].length;
-
-            // If no existing subset can fit the family, create a new one if possible
-            if (maxAvailableSpace < family.length && currentSubset < this.maxSubsets) {
-                bestSubsetIndex = currentSubset;
-                currentSubset++;
-            }
-
-            // Assign family to best subset (even if it exceeds max size - constraint will be handled later)
+            unassignedFamilies.shift();
+            currentSubset = placement.nextSubset;
             for (const competitor of family) {
-                subsets[bestSubsetIndex].push(competitor);
+                subsets[placement.index].push(competitor);
 
                 const competitorIndex = this.competitors.findIndex(c => c.id === competitor.id);
-                const variableIndex = competitorIndex * this.maxSubsets + bestSubsetIndex;
+                const variableIndex = competitorIndex * this.maxSubsets + placement.index;
                 solution[variableIndex].value = 1;
             }
         }
@@ -269,37 +277,7 @@ class SimpleMIPSolver {
     }
 
     private calculateSubsetScore(subset: Competitor[]): number {
-        if (subset.length === 0) return 0;
-
-        // Simplified scoring for individual subset
-        let score = 0;
-        const size = subset.length;
-
-        // Size preference
-        const sizeDeviation = Math.abs(size - this.options.preferredSubsetSize);
-        score += Math.max(0, 10 - sizeDeviation * 2);
-
-        // Gender balance
-        const genderCounts = new Map<string, number>();
-        for (const competitor of subset) {
-            genderCounts.set(competitor.gender, (genderCounts.get(competitor.gender) || 0) + 1);
-        }
-
-        let evenGenderCount = 0;
-        for (const count of genderCounts.values()) {
-            if (count % 2 === 0) evenGenderCount += count;
-        }
-        score += (evenGenderCount / size) * 10 * this.options.genderWeight;
-
-        // Age category homogeneity
-        const ageCounts = new Map<string, number>();
-        for (const competitor of subset) {
-            ageCounts.set(competitor.ageCategory, (ageCounts.get(competitor.ageCategory) || 0) + 1);
-        }
-        const maxAgeCount = Math.max(...ageCounts.values());
-        score += (maxAgeCount / size) * 10 * this.options.ageCategoryWeight;
-
-        return score;
+        return scoreSubset(subset, this.options).total;
     }
 
     solve(): MIPVariable[] {
